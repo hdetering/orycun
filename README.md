@@ -14,10 +14,30 @@ This repository is structured as follows:
 
 # Outline
 
-In this study, DNA from 81 individual rabbits were sequenced using the Genotyping-by-Sequencing ([Elshire2011][1]) protocol. A genome-wide association study was carried out to determine potential genetic factors associated with the survival of infection with rabbit heamorrhagic disease (RHD) virus.
+In this study, DNA from 81 individual rabbits was extracted and processed using the Genotyping-by-Sequencing ([Elshire2011][1]) protocol. Subsequently, individuals were pooled and sequenced on an Illumina HiSeq2000 (5 Lanes, 100bp paired-end).
+
+A genome-wide association study was carried out to determine potential genetic factors associated with the survival of infection with rabbit heamorrhagic disease (RHD) virus.
+
+# Quality control
+
+Sequencing reads were trimmed to 90 base pairs (bp) length using [fastx-trimmer](http://hannonlab.cshl.edu/fastx_toolkit/) by removing the last 10 bp.
 
 # Demultiplexing
 
-Individuals were pooled for sequencing after tagging them with custom [barcodes][meta/samples_lib_barcode.tsv]. The resulting reads were demultiplexed with
+Individuals were pooled for sequencing after tagging them with custom [barcodes](meta/samples_lib_barcode.tsv). Sequencing reads were demultiplexed using the [process_radtags](http://catchenlab.life.illinois.edu/stacks/comp/process_radtags.php) script of the [Stacks](http://catchenlab.life.illinois.edu/stacks/) suite.
+
+```
+# Quality filter (checking barcodes and restriction sites as well)
+# Since we use barcodes of variable length which STACKS does not support
+# we need to run a filtering step for each barcode length.
+for l in 4 5 6 7 8 9
+do
+  /home/digga/tools/stacks/bin/process_radtags \
+    -1 ./raw/120808_I162_FCC10KDACXX_L3_1.trimmed.fq \
+    -2 ./raw/120808_I162_FCC10KDACXX_L3_2.trimmed.fq \
+    -o ./samples/ -b ./barcodes.$l.txt -e pstI -r -c -q -t 81 -w 0.15 -s 20
+done
+```
+
 
 [1]: https://doi.org/10.1371/journal.pone.0019379
