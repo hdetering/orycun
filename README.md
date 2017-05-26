@@ -14,6 +14,10 @@ This repository is structured as follows:
 
 # Outline
 
-In this study, DNA from 81 individual rabbits were sequenced using the Genotyping-by-Sequencing ([Elshire2011][1]) protocol.
+In this study, DNA from 81 individual rabbits were sequenced using the Genotyping-by-Sequencing ([Elshire2011][1]) protocol. A genome-wide association study was carried out to determine potential genetic factors associated with the survival of infection with rabbit heamorrhagic disease (RHD) virus.
+
+# Demultiplexing
+
+Individuals were pooled for sequencing after tagging them with custom [barcodes][meta/samples_lib_barcode.tsv]. The resulting reads were demultiplexed with
 
 [1]: https://doi.org/10.1371/journal.pone.0019379
