@@ -20,7 +20,7 @@ A genome-wide association study was carried out to determine potential genetic f
 
 # Quality control
 
-Sequencing reads were trimmed to 90 base pairs (bp) length using [fastx-trimmer](http://hannonlab.cshl.edu/fastx_toolkit/) by removing the last 10 bp.
+Sequencing reads were trimmed to 90 base pairs (bp) length by removing the last 10 bp using [fastx-trimmer](http://hannonlab.cshl.edu/fastx_toolkit/).
 
 # Demultiplexing
 
@@ -32,7 +32,7 @@ Individuals were pooled for sequencing after tagging them with custom [barcodes]
 # we need to run a filtering step for each barcode length.
 for l in 4 5 6 7 8 9
 do
-  /home/digga/tools/stacks/bin/process_radtags \
+  $HOME/tools/stacks/bin/process_radtags \
     -1 ./raw/120808_I162_FCC10KDACXX_L3_1.trimmed.fq \
     -2 ./raw/120808_I162_FCC10KDACXX_L3_2.trimmed.fq \
     -o ./samples/ -b ./barcodes.$l.txt -e pstI -r -c -q -t 81 -w 0.15 -s 20
