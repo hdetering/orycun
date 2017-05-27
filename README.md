@@ -18,15 +18,20 @@ In this study, DNA from 81 individual rabbits was extracted and processed using 
 
 A genome-wide association study was carried out to determine potential genetic factors associated with the survival of infection with rabbit heamorrhagic disease (RHD) virus.
 
-# Quality control
+# Quality Control and De-multiplexing
 
-Sequencing reads were trimmed to 90 base pairs (bp) length by removing the last 10 bp using [fastx-trimmer](http://hannonlab.cshl.edu/fastx_toolkit/).
+Sequencing reads were trimmed to 90 base pairs (bp) length by removing the last 10 bp using [fastx-trimmer](http://hannonlab.cshl.edu/fastx_toolkit/). This QC approach was chosen because the downstream tool for processing of the loci (Stacks) did accept only reads of uniform length at the time of the analyis.
 
-# Demultiplexing
-
-Individuals were pooled for sequencing after tagging them with custom [barcodes](meta/samples_lib_barcode.tsv). Sequencing reads were demultiplexed using the [process_radtags](http://catchenlab.life.illinois.edu/stacks/comp/process_radtags.php) script of the [Stacks](http://catchenlab.life.illinois.edu/stacks/) suite.
-
+```bash
+cat ./raw/120808_I162_FCC10KDACXX_L3_1.fq | \
+    fastx_trimmer -l 90 > ./raw/120808_I162_FCC10KDACXX_L${PBS_ARRAYID}_1.trimmed.fq
+cat ./raw/120808_I162_FCC10KDACXX_L$3_2.fq | \
+    fastx_trimmer -l 90 > ./raw/120808_I162_FCC10KDACXX_L${PBS_ARRAYID}_2.trimmed.fq
 ```
+
+Since individuals were pooled for sequencing after tagging them with custom [barcodes](meta/samples_lib_barcode.tsv), sequencing reads were de-multiplexed using the [process_radtags](http://catchenlab.life.illinois.edu/stacks/comp/process_radtags.php) script of the [Stacks](http://catchenlab.life.illinois.edu/stacks/) suite.
+
+```bash
 # Quality filter (checking barcodes and restriction sites as well)
 # Since we use barcodes of variable length which STACKS does not support
 # we need to run a filtering step for each barcode length.
