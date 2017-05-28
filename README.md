@@ -29,7 +29,7 @@ cat ./raw/120808_I162_FCC10KDACXX_L$3_2.fq | \
     fastx_trimmer -l 90 > ./raw/120808_I162_FCC10KDACXX_L${PBS_ARRAYID}_2.trimmed.fq
 ```
 
-Since individuals were pooled for sequencing after tagging them with custom [barcodes](meta/samples_lib_barcode.tsv), sequencing reads were de-multiplexed using the [process_radtags](http://catchenlab.life.illinois.edu/stacks/comp/process_radtags.php) script of the [Stacks](http://catchenlab.life.illinois.edu/stacks/) suite.
+Since individuals were pooled for sequencing after tagging them with custom [barcodes](meta/samples_lib_barcode.csv), sequencing reads were de-multiplexed using the [process_radtags](http://catchenlab.life.illinois.edu/stacks/comp/process_radtags.php) script of the [Stacks](http://catchenlab.life.illinois.edu/stacks/) suite.
 
 ```bash
 # Quality filter (checking barcodes and restriction sites as well)
@@ -122,10 +122,14 @@ plink --noweb --file batch_1.plink --missing-genotype 0 \
       --fisher --model
 ```
 
-Result: **154546 SNPs** with association scores remain.
+Result: **154546 SNPs** with association scores remain, of which p-values from *Fisher exact tests* under the *genotypic model* ("GENO") were further analyzed.
 
 # Gene Assignment
 
 SNPs were assigned to genes annotated on the OryCun2.0 assembly using the R package [LDsnpR](http://services.cbu.uib.no/software/ldsnpr).
+
+```r
+
+```
 
 [1]: https://doi.org/10.1371/journal.pone.0019379
