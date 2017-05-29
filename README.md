@@ -95,7 +95,9 @@ $HOME/bin/ref_map.pl -T 24 -m 10 \
 # [77 more samples...]
 ```
 
-Result: **283602 SNPs** were be identified across 78 individuals.
+## Result:
+
+**283602 SNPs** were be identified across 78 individuals.
 
 # Association Test
 
@@ -118,11 +120,16 @@ plink --noweb --file batch_1.plink --missing-genotype 0 \
       --fisher --model
 ```
 
-Result: **154546 SNPs** with association scores remain, of which p-values from *Fisher exact tests* under the *genotypic model* ("GENO") were further analyzed.
+## Result
+
+**154546 SNPs** with association scores remain, of which p-values from *Fisher exact tests* under the *genotypic model* ("GENO") were further analyzed.
 
 # Gene Assignment
 
 SNPs were assigned to genes annotated on the OryCun2.0 assembly using the R package [LDsnpR](http://services.cbu.uib.no/software/ldsnpr). Please refer to script [snps2genes.R](scripts/snps2genes.R) for details.
 
+## Result
+
+**9219 SNPs** were assigned to at least one gene, **14962 genes** had at least one SNP assigned. Output can be found in [results/genes_scores_snps.40k.csv](results/genes_scores_snps.40k.csv) (raw) and [results/genes_scores_snps.40k.xls](results/genes_scores_snps.40k.xls) (with additional meta info).
 
 [1]: https://doi.org/10.1371/journal.pone.0019379

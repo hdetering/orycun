@@ -84,7 +84,7 @@ g.scores$p.fdr <- p.adjust(g.scores$score, method='fdr')
 cor(g.scores$window_size, -log10(g.scores$score), use="complete")
 cor(g.scores$window_size, -log10(g.scores$p.fdr), use="complete")
 
-g.snps <- read.delim("LDsnpRout_rho.40k.snps.csv",
+g.snps <- read.delim("LDsnpRout.40k.snps.csv",
                      col.names=c("row","space","start","end","width","names","score.data"), 
                      comment.char="#", stringsAsFactors=F)
 
