@@ -1,4 +1,4 @@
-This repository describes the analysis pipeline used in [Schwensow et al., 2017](XXX), an association study of an Australian rabbit population.
+This repository describes the analysis pipeline used in ([Schwensow et al., 2017](XXX)), an association study of an Australian wild rabbit population.
 
 This repository is structured as follows:
 ```
