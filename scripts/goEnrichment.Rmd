@@ -1,0 +1,1293 @@
+---
+title: "GO Enrichment Analysis"
+author: "Steve Pederson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Setup
+
+```{r loadPackages}
+library(readr)
+library(readxl)
+library(dplyr)
+library(tibble)
+library(magrittr)
+library(parallel)
+library(ggplot2)
+library(reshape2)
+library(GO.db)
+library(GOstats)
+library(xtable)
+library(pander)
+library(RColorBrewer)
+library(Rgraphviz)
+library(stringr)
+library(biomaRt)
+library(scales)
+library(GenomicRanges)
+library(GenomicFeatures)
+library(ggbio)
+logit <- binomial()$linkfun
+inv.logit <- binomial()$linkinv
+```
+
+
+## Data cleaning
+
+Load in the entire Excel file
+
+```{r loadData, echo=TRUE, results='hide'}
+snpFile <- file.path("..", "results", "genes_scores_snps.40k.xls")
+snpScores <- read_excel(path = snpFile, sheet = 1, 
+                        col_types = c("text", "numeric", "skip")[c(rep(1, 3), 3, 1, 
+                                                                    rep(2, 8), 1, 2, 
+                                                                    rep(1, 5), 2, 3, 2, 2)]) 
+```
+
+The data as loaded has `r sum(is.na(snpScores$p.fdr))` SNP-to-gene mappings with missing data, and complete data for `r sum(!is.na(snpScores$p.fdr))` mappings.
+It was assumed that missing data was intentional, and these SNP-to-gene mappings were removed from the dataset.
+
+The following steps were taken as data filtering:
+
+1. Removal of the `r sum(is.na(snpScores$p.fdr))` genes with missing data
+2. Removal of the fourth column. This was simply a numeric id for each chromosome which was surplus to requirements.
+3. Chromosomes 1 - 21 were loaded by default as character strings with six decimal places and these were corrected.
+An alternative specification for Chromosomes was also created using the `chr` prefix to more clearly delineate between text and numeric values.
+4. Missing gene names were specified by  __Excel__ as having the name `0.00`, and these were re-assigned as blank
+
+```{r tidyData}
+snpScores %<>%
+  filter(!is.na(p.fdr)) %>% 
+  dplyr::select(ensembl_gene_id,
+                contains("chr"), 
+                starts_with("gene"),
+                min_snp,
+                p = score,
+                starts_with("p"),
+                contains("aff"),
+                ends_with("stream")
+                ) %>% 
+  rowwise() %>%
+  mutate(gene_name = gsub("0.00", "", gene_name),
+         chr_name = ifelse(grepl("^(GL|AA)", chr_name), 
+                           chr_name, 
+                           paste0("chr", as.integer(chr_name))),
+         in_gene = all(pos >= gene_start, pos <= gene_end),
+         upstream = as.logical(upstream),
+         downstream = as.logical(downstream)) %>%
+  ungroup()
+```
+
+After cleaning, this original dataset contained `r length(unique(filter(snpScores, p.fdr < 0.1)$min_snp))` unique SNPs which are significant to an `FDR` $\approx$ 0.1.
+These are associated with `r length(unique(filter(snpScores, p.fdr < 0.1)$ensembl_gene_id))` unique Ensembl gene IDs.
+
+## Filtering based on Identified Samples
+
+```{r geno2Num}
+geno2Num <- function(geno){
+  str_split_fixed(geno, pattern = "/", n = 3) %>% 
+		as.integer() %>% 
+		matrix(ncol = 3) %>% 
+		rowSums()
+}
+```
+
+
+```{r}
+totals <- data_frame(aff = max(geno2Num(snpScores$aff)), 
+										 unaff = max(geno2Num(snpScores$unaff)))
+genoThresh <- 0
+keep <- totals*genoThresh
+```
+
+For the results as supplied, the genotypes for those marked as `aff` were assumed to be the rabbits who died, whilst the `unaff` remainder were assumed to be the survivors.
+The sample sizes were `r pander(as.vector(unlist(totals)))` for `r pander(names(totals))` respectively.
+
+```{r}
+snpScores %<>%
+  mutate(nAff = geno2Num(aff),
+         nUnaff = geno2Num(unaff))
+```
+
+A new set of FDR-adjusted $p$-values was created based on the filtered data.
+In addition, these adjusted values were calculated _per SNP_, instead of _per gene_.
+
+```{r}
+newPadj <- snpScores %>%
+  filter(nAff >= keep$aff,
+         nUnaff >= keep$unaff) %>%
+  dplyr::select(min_snp, p) %>%
+  distinct(min_snp, .keep_all = TRUE) %>%
+  mutate(FDR = p.adjust(p, "fdr"))
+```
+
+These were added to the data to account for the removal of SNPs with low rates of genotype identification.
+
+```{r}
+snpScores %<>%
+  filter(nAff >= keep$aff,
+         nUnaff >= keep$unaff) %>%
+  left_join(newPadj) %>%
+  dplyr::select(-p.fdr)
+```
+
+This gave a total of `r length(unique(snpScores$min_snp))` unique SNPs, with `r nrow(snpScores)` genes associated (i.e. within 40kb).
+
+## Assessment of Linkage
+
+In order to account for linkage the distances between neighbouring candidate markers was characterised.
+Where only a single SNP was identified on a scaffold (or chromosome) this distance was defined as infinite.
+
+```{r}
+distances <- snpScores %>%
+  arrange(chr_name, pos) %>%
+  distinct(min_snp, .keep_all = TRUE) %>%
+  split(f = .$chr_name) %>%
+  lapply(function(x){
+    if (nrow(x) == 1){
+      d <- Inf
+    }
+    else {
+      d <- x$pos[-1] - x$pos[-nrow(x)]
+    }
+    d
+  }) %>%
+  unlist
+```
+
+```{r}
+checkDistances <- c(10, 20, 40, 100)*1000
+```
+
+
+The median distance between neighbouring SNPs was found to be `r comma(median(distances))`bp.
+Using the distances of `r pander(checkDistances/1000)` kb respectively, a total of `r pander(percent(sapply(checkDistances, function(x){mean(distances < x)})))` SNPs were found to have neighbours within these distances.
+
+```{r, echo = FALSE, fig.cap=paste("Histogram of the distances between neighbouring SNPs. The distances of", pander(checkDistances/1000), "kb are shown as the red vertical line. Distances are measured in nucleotides")}
+hist(log10(distances), breaks = 100, 
+     main = "Distances between neighbouring SNPs",
+     xlab = expression(paste(log[10], "(distance)")))
+abline(v = log10(checkDistances), lty = 2, lwd = 2, col = c("red"))
+```
+
+
+## Significant SNPs
+
+```{r}
+pCut <- 0.001
+fdrCut <- snpScores %>%
+  filter(p < pCut) %>%
+  summarise(FDR = max(FDR)) %>%
+  extract2("FDR")
+```
+
+Selecting the SNPs with a $p$-values $<$ `r pCut` gave an FDR of `r percent(fdrCut)`, and a total of `r nrow(distinct(filter(snpScores, p < pCut), min_snp))` significant SNPs.
+These were associated with `r nrow(distinct(filter(snpScores, p < pCut), ensembl_gene_id))` distinct genes
+
+
+# Manhattan Plot
+
+A Manhattan plot was generated to summarise the results.
+This was done by forming a `GRanges` object, the plotting using the package `ggbio`.
+Of the `r nrow(distinct(filter(snpScores, p < pCut), min_snp))` significant SNPs defined above, a total of `r nrow(distinct(filter(snpScores, p < pCut, grepl("chr", chr_name)), min_snp))` were located on the autosomes (i.e. chr1 to chr21, disregarding the scaffolds).
+In total `r nrow(distinct(filter(snpScores, grepl("chr", chr_name)), min_snp))` autosomal SNPs were in the set tested above.
+
+```{r}
+gr <- snpScores %>% 
+  filter(chr_name %in% paste0("chr", 1:21)) %>%
+  distinct(min_snp, .keep_all = TRUE) %>%
+  arrange(chr_name, pos) %>%
+  DataFrame() %>%
+  makeGRangesFromDataFrame(keep.extra.columns=TRUE,
+                           seqnames.field = "chr_name",
+                           start.field = "pos",
+                           end.field = "pos")
+```
+
+```{r manhattanPlot, echo=FALSE, fig.cap="Manhattan plot showing p-values for all SNPs within 40kb of a gene, and genotyped in $>$75\\% of individuals within each population. The horizontal line indicates the cutoff for the significant SNPs, and an FDR of 12\\%."}
+plotGrandLinear(gr, aes(y = -log10(p))) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(pCut), linetype = 2) +
+  guides(colour = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.8, vjust = 0.5),
+        panel.grid = element_blank()) +
+  labs(y = expression(paste("-", log[10], "p"))) +
+  xlim(c(3000000, 97000000))
+```
+
+```{r exportManhattan, echo=FALSE, include=FALSE}
+png("survivorManhattan.png", width = 7, height = 4, units = "in", res = 300)
+plotGrandLinear(gr, aes(y = -log10(p))) +
+  theme_bw() +
+  geom_hline(yintercept = -log10(pCut), linetype = 2) +
+  guides(colour = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.8, vjust = 0.5),
+        panel.grid = element_blank()) +
+  labs(y = expression(paste("-", log[10], "p"))) +
+  xlim(c(3000000, 97000000))
+dev.off()
+```
+
+
+# Significant SNPs in Exons
+
+Firstly, a list of exons needs to be generated from a the `gff3` file.
+
+```{r}
+gtfFile <- file.path("..", "meta", "Oryctolagus_cuniculus.OryCun2.0.87.gff3")
+exonGR <- makeTxDbFromGFF(gtfFile) %>% exonsBy(by = "gene")
+```
+
+The unique SNPs mapping to exons were then found.
+
+```{r}
+snpInExon <- snpScores %>%
+  filter(p < pCut) %>%
+  mutate(chr_name = gsub("chr", "", chr_name)) %>%
+  arrange(chr_name, gene_start) %>%
+  dplyr::select(chr_name, pos, ensembl_gene_id, min_snp, p) %>%
+  distinct(min_snp,.keep_all = TRUE) %>%
+  as.data.frame() %>%
+  makeGRangesFromDataFrame(keep.extra.columns = TRUE,
+                           ignore.strand =TRUE,
+                           seqinfo = seqinfo(exonGR),
+                           seqnames.field = "chr_name",
+                           start.field = "pos", 
+                           end.field = "pos") %>%
+  extract(queryHits(findOverlaps(., exonGR))) %>%
+  subset(!duplicated(min_snp))
+```
+
+This gave a total of `r length(snpInExon)` significant SNPs which were within exons.
+These were then mapped to the appropriate genes to find where they mapped.
+
+```{r}
+exonWithSnp <- exonGR %>%
+  unlist() %>%
+  extract(subjectHits(findOverlaps(snpInExon, .)))
+```
+
+This gave a total of `r length(exonWithSnp)` genes with SNPs within an exon, and clearly one SNP was within exons from two genes on opposite strands.
+
+```{r}
+snp2Gene <- snpInExon %>%
+  as.data.frame() %>%
+  dplyr::select(seqnames, pos = start, ensembl_gene_id, min_snp) %>%
+  right_join(exonWithSnp %>% 
+               as.data.frame %>%
+               rownames_to_column("Gene")) %>%
+  dplyr::select(min_snp, 
+                chr = seqnames, 
+                pos, 
+                ensembl_gene_id, 
+                Gene, 
+                strand,
+                exon_start = start, 
+                exon_end = end) 
+```
+
+```{r, echo=FALSE}
+snp2Gene %>%
+  mutate(pos = comma(pos),
+         exon_start = comma(exon_start),
+         exon_end = comma(exon_end)) %>%
+  pander(justify = "lrrllcrr",
+         split.tables = Inf,
+         style = "rmarkdown",
+         caption = "Significant SNPs within exons")
+```
+
+These were additionally written to the file `sigSnpsInExons.csv`
+
+```{r}
+snp2Gene %>% write_csv("../results/sigSnpsInExons.csv")
+```
+
+
+# GO Analysis
+
+## Mapping Genes To GO Terms
+
+Genes were mapped to GO terms using the mappings contained in `biomaRt` as of `20161210`.
+
+```{r allGO, eval = FALSE}
+mart <- useMart("ENSEMBL_MART_ENSEMBL", 
+                dataset = "ocuniculus_gene_ensembl",
+                host = "oct2016.archive.ensembl.org")
+attr <-  data_frame(name = c("ensembl_gene_id", "external_gene_name", "description",
+                             "namespace_1003", "go_id", 
+                             "name_1006", "definition_1006", "go_linkage_type")) %>%
+  left_join(listAttributes(mart)) %>%
+  filter(page == "feature_page") %>%
+  dplyr::select(name, description)
+allGO <- getBM(attributes = attr$name,
+               filters = "ensembl_gene_id",
+               values = snpScores$ensembl_gene_id,
+               mart = mart) %>%
+  set_names(attr$description) %>%
+  as_data_frame()
+write_delim(allGO, "../results/allGO.txt")
+```
+
+```{r}
+allGO <- read_delim("../results/allGO.txt", delim = " ")
+```
+
+
+At this stage the gene names were added to the SNPs and the objects was exported as a `csv` file.
+
+```{r}
+snpScores %<>% left_join(dplyr::select(allGO, -contains("GO")) %>% 
+                           distinct(`Ensembl Gene ID`, .keep_all = TRUE), 
+                         by = c("ensembl_gene_id" = "Ensembl Gene ID")) %>%
+  mutate(gene_name = `Associated Gene Name`) %>%
+  dplyr::select(-contains("Associated")) %>%
+  rowwise() %>%
+  mutate(dist2Gene = if_else(in_gene, 0,
+                             min(abs(pos - gene_start), abs(pos - gene_end)))) %>%
+  dplyr::select(ensembl_gene_id, ends_with("name"), Description, everything())
+```
+
+
+```{r}
+write_csv(snpScores, "../results/filteredSNPScores.csv")
+```
+
+In addition to this, the significant SNPs/genes from the potentially interesting region of Chromosome 12 were exported as a separate file.
+
+
+```{r}
+snpScores %>%
+  filter(p < pCut,
+         chr_name == "chr12") %>%
+  arrange(pos) %>%
+  readr::write_csv("../results/chr12.csv")
+```
+
+
+## Mapping Genes to GO terms
+
+In keeping with prior analysis, the GO terms will be associated with each SNP, as opposed to each gene.
+As each SNP may be assigned to multiple genes, and these may share common GO terms this will ensure that GO terms are only counted once per SNP.
+
+```{r snpSplit}
+geneSplit <- snpScores %>%
+  split.data.frame(f = .$ensembl_gene_id)
+```
+
+The data was then split by gene to collect the set of GO terms for each gene.
+
+```{r snp2GO}
+gene2GO <- names(geneSplit) %>%
+  mclapply(function(x){
+    allGO %>%
+    filter(`Ensembl Gene ID` %in% x) %>%
+      distinct(`GO Term Accession`, .keep_all = TRUE) 
+  },
+  mc.cores = 20) %>%
+  set_names(names(geneSplit))
+```
+
+```{r snpAnnotHist, fig.height=5, fig.cap = "Distribution of GO Terms annotated to each gene."}
+gene2GO %>% 
+  vapply(nrow, integer(1)) %>% 
+  hist(breaks = 100,
+       main = "",
+       xlab = "Number of GO Terms Per Gene",
+       ylab = "Number of Genes")
+```
+
+## Building Full GO Graphs
+
+The inheritable nature of GO terms means that every GO term ascribed to a SNP will also inherit the full set of ancestor terms back to the root of the ontology.
+The complete set of GO annotations for each SNP were then built for each SNP.
+
+```{r setAncestors}
+allAncestorBP <- GOBPANCESTOR %>%
+  as.list() %>%
+  extract(!is.na(.))
+allAncestorCC <- GOCCANCESTOR %>%
+  as.list() %>%
+  extract(!is.na(.))
+allAncestorMF <- GOMFANCESTOR %>%
+  as.list() %>%
+  extract(!is.na(.))
+```
+
+
+```{r fullSnp2GO}
+fullGene2GO <- 
+  mclapply(gene2GO,
+           function(x){
+             terms <- split(x, x$`GO domain`) %>% 
+               lapply(extract2, "GO Term Accession")
+             list(
+               BP = allAncestorBP[terms$biological_process] %>% 
+                 unlist %>% 
+                 c(terms$biological_process) %>%
+                 unique(),
+               CC = allAncestorCC[terms$cellular_component] %>% 
+                 unlist %>% 
+                 c(terms$cellular_component) %>%
+                 unique(),
+               MF = allAncestorMF[terms$molecular_function] %>% 
+                 unlist %>% 
+                 c(terms$molecular_function) %>%
+                 unique()
+             )
+           },
+           mc.cores = 20) %>%
+  set_names(names(gene2GO))
+```
+
+These complete annotations were then broken into separate ontologies in separate `R` objects.
+
+```{r fullSNP}
+fullGene <- list(
+  BP = lapply(fullGene2GO, extract2, "BP"),
+  CC = lapply(fullGene2GO, extract2, "CC"),
+  MF = lapply(fullGene2GO, extract2, "MF")
+)
+```
+
+```{r plotOntologies, echo=FALSE, fig.height=4, fig.width=6, fig.cap = "Complete annotations of GO terms to SNPs after incorporating all parent terms."}
+data_frame(
+  gene_id = names(fullGene2GO),
+  BP = vapply(fullGene$BP, length, integer(1)),
+  CC = vapply(fullGene$CC, length, integer(1)),
+  MF = vapply(fullGene$MF, length, integer(1))
+) %>%
+  melt(id.vars = "gene_id") %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot() +
+  theme_bw() +
+  scale_y_log10() +
+  labs(x = "Ontology", 
+       y = "GO Terms Per Gene")
+```
+
+# Analysis
+
+## SNP and GO Term preparation
+
+The lists of parents and children for each GO term were formed, and terms directly under the ontology roots were collected as the `firstLevel  terms.
+The terms directly under these were also collected as the `secondLevel` terms.
+
+```{r setParents}
+allParents <- list(
+  BP = GOBPPARENTS %>%
+    as.list() %>%
+    extract(!is.na(.)),
+  CC = GOCCPARENTS %>%
+    as.list() %>%
+    extract(!is.na(.)),
+  MF = GOMFPARENTS %>%
+  as.list() %>%
+  extract(!is.na(.))
+)
+```
+
+```{r getChildren}
+allChildren <- list(
+  BP = GOBPCHILDREN %>%
+    as.list() %>%
+    extract(!is.na(.)),
+  CC = GOCCCHILDREN %>%
+    as.list() %>%
+    extract(!is.na(.)),
+  MF = GOMFCHILDREN %>%
+  as.list() %>%
+  extract(!is.na(.))
+)
+```
+
+```{r}
+rootNodes <- c("all", "GO:0008150", "GO:0003674", "GO:0005575") %>%
+  set_names(c("all", "BP", "MF", "CC"))
+firstLevel <- rootNodes %>%
+  extract(-1) %>%
+  names() %>%
+  sapply(function(x){
+    allChildren[[x]][[rootNodes[x]]]
+  },
+  simplify = FALSE)
+secondLevel <- firstLevel %>%
+  names %>%
+  sapply(function(x){
+    unlist(allChildren[[x]][firstLevel[[x]]])
+  },
+  simplify = FALSE) 
+```
+
+```{r}
+sigIDs <- snpScores %>%
+  filter(p < pCut) %>%
+  extract2("ensembl_gene_id") %>%
+  unique
+```
+
+The set of GO terms within the `r length(sigIDs)` significant genes (FDR $<$ `r percent(fdrCut)`) were then collected, and collated into their respective ontologies.
+Root terms, along with first and second-level GO terms were removed from each ontology.
+
+```{r goInSnps}
+goInGenes <- list(
+  BP = fullGene2GO %>%
+    extract(sigIDs) %>%
+    lapply(extract2, "BP") %>%
+    unlist %>%
+    unique %>%
+    setdiff(rootNodes) %>%
+    setdiff(firstLevel$BP) %>%
+    setdiff(secondLevel$BP) %>%
+    # setdiff(thirdLevel$BP) %>%
+    intersect(unlist(allParents$BP)),
+  CC = fullGene2GO %>%
+    extract(sigIDs) %>%
+    lapply(extract2, "CC") %>%
+    unlist %>%
+    unique %>%
+    setdiff(rootNodes) %>%
+    setdiff(firstLevel$CC) %>%
+    setdiff(secondLevel$CC) %>%
+    # setdiff(thirdLevel$CC) %>%
+    intersect(unlist(allParents$CC)),
+  MF = fullGene2GO %>%
+    extract(sigIDs) %>%
+    lapply(extract2, "MF") %>%
+    unlist %>%
+    unique %>%
+    setdiff(rootNodes) %>%
+    setdiff(firstLevel$MF) %>%
+    setdiff(secondLevel$MF) %>%
+    # setdiff(thirdLevel$MF) %>%
+    intersect(unlist(allParents$MF))
+)
+```
+
+```{r goSummary}
+list(vapply(firstLevel, length, integer(1)), 
+     vapply(secondLevel, length, integer(1)), 
+     vapply(goInGenes, length, integer(1))) %>% 
+  as.data.frame() %>%
+  set_names(c("First Level", 
+              "Second Level", 
+              "Tested Terms")) %>%
+  rownames_to_column("Ontology") %>%
+  mutate(`Second Level` = `Second Level` - `First Level`) %>%
+  pander(caption = "Structure of GO Terms removed (1st and 2nd Level) and tested")
+```
+
+## Parent-Child Analysis
+
+
+```{r}
+minSigG <- 2
+```
+
+The list of `r length(sigIDs)` significant genes (i.e. FDR $<$ `r percent(fdrCut)`) was defined as a vector, and an `R` function was written to perform the Parent-Child analysis using a logistic regression model.
+The function was written to only include GO terms with a default of $>$`r minSigG` significant SNPs being assigned to the term, and not removed in the previous filtering steps.
+However, this value can be redefined during any analysis using the parameter `minSig`.
+
+
+```{r pcFun}
+pcFun <- function(child, ontology, allGenes = fullGene, sigGenes = sigIDs, 
+                  parentList = allParents, minSig = minSigG ){
+  
+  # Check the ontology is correct for the term
+  stopifnot(child %in% names(parentList[[ontology]]))
+  parents <- parentList[[ontology]][[child]]
+
+  # Get all SNPs in parents
+  parentSnps <- vapply(allGenes[[ontology]],
+                       function(x){any(parents %in% x)},
+                       logical(1)) %>%
+    which %>%
+    names
+
+  # Get all SNPs in the child
+  childSnps <- vapply(allGenes[[ontology]],
+                       function(x){any(child %in% x)},
+                       logical(1)) %>%
+    which %>%
+    names
+
+  # Form a data_frame & fit the GLM
+  df <- data_frame(SNP = parentSnps,
+                   Child = SNP %in% childSnps,
+                   Sig = SNP %in% sigGenes)
+
+  if (nrow(filter(df, Child, Sig)) >= minSig & mean(df$Child) < 1) {
+    # Only fit the model if there are enough 
+    # sigGenes in the child set of snps.
+    mod <- glm(Child~Sig, "binomial", df)
+    
+    #Format the results as a data_frame
+    out <- data_frame(
+      Term = child,
+      Ontology = ontology,
+      TotalParent = nrow(df),
+      TotalChild = sum(df$Child),
+      SigInParent = sum(df$Sig),
+      SigInChild = nrow(filter(df, Sig, Child)),
+      Expected = inv.logit(coef(mod)[1])*SigInParent,
+      p = coef(summary(mod))["SigTRUE", "Pr(>|z|)"]
+
+    )
+  }
+  else{
+    out <- data_frame(
+      Term = child,
+      Ontology = ontology,
+      TotalParent = nrow(df),
+      TotalChild = sum(df$Child),
+      SigInParent = sum(df$Sig),
+      SigInChild = nrow(filter(df, Sig, Child)),
+      Expected = TotalChild*SigInParent/TotalParent,
+      p = NA
+    )
+  }
+  
+  out
+  
+}
+```
+
+```{r}
+str2Width <- function(x, width = 30){
+  long <- nchar(x) > width
+  x[long] <- paste0(strtrim(x[long], width-3), "...")
+  x
+}
+```
+
+
+## Biological Process
+
+```{r fitPcBP}
+pcBP <- goInGenes$BP %>%
+  mclapply(pcFun, ontology = "BP", minSig = minSigG, mc.cores = 20) %>%
+  bind_rows() %>%
+  filter(!is.na(p)) %>%
+  mutate(FDR = p.adjust(p, "BH")) %>%
+  arrange(p) 
+```
+
+```{r resPcBP, echo=FALSE, results='asis'}
+pcBP %>% 
+  mutate(adjP = p.adjust(p, "holm"),
+         FDR = p.adjust(p, "BH")) %>%
+  dplyr::slice(1:10) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         adjP = format(adjP, digits = 2),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, 
+                starts_with("Total"),
+                starts_with("Sig"), 
+                Expected, p, adjP, FDR) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  xtable(caption = paste("Top 10 results for GO enrichment for Biological Process.",
+                         "Counts represent either genes in the dataset,",
+                         "or in the list of significant genes."),
+         align = "llp{3.2cm}rrrrrrrr") %>%
+  print(include.rownames = FALSE,
+        size = "footnotesize",
+        caption.placement = "top",
+        comment = FALSE)
+```
+
+The entire set of `r nrow(pcBP)` _Biological Procss_ GO terms represented amongst the significant genes were analysed using the above function.
+The minimum requirement for analysis was `r minSigG` genes within the set of significant genes, and any GO terms with fewer than this number in the list of significant genes were removed.
+P-values were adjusted using the step-wise Bonferroni adjustment (i.e. Holm's method), and estimates of the FDR were obtained using the Benjamini-Hochberg method.
+Whilst this method formally assumes independence of test-statistics, Benjamini & Yekutieli showed that in the case of positive dependence amongst test-statistics, the FDR control still holds (https://projecteuclid.org/download/pdf_1/euclid.aos/1013699998).
+Whilst far less conservative than the Benjamini-Yekutieli method originally used for this analysis, it can be considered as a valid approach.
+
+This list of GO Terms was exported as the file `parentChildBP.csv`
+
+```{r exportCSV}
+pcBP %>% 
+  mutate(adjP = p.adjust(p, "holm")) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         adjP = format(adjP, digits = 2),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, 
+                starts_with("Total"),
+                starts_with("Sig"),
+                Expected, p, adjP, FDR) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  write_csv("../results/parentChildBP.csv")
+```
+
+## Plots For Significant GO Terms
+
+```{r getSigBP}
+resFDR <- 0.1
+sigBPGO <- pcBP %>%
+  mutate(FDR = p.adjust(p, "BH")) %>%
+  filter(FDR < resFDR) %>%
+  extract2("Term")
+```
+
+Using a FDR of `r resFDR`, a total of `r length(sigBPGO)` GO terms (i.e. `r pander(sigBPGO)`) were found to be significantly enriched from the Biological Process Ontology.
+
+In order to plot these as directed acyclic graph, several preparatory steps were required.
+First the colours were defined manually and a legend prepared.
+A minimum $p$-value of `1e-04` was assumed when creating the legend.
+
+```{r plotCols}
+nCols <- 101
+pSeq <- seq(0,4, length.out = nCols)
+plotCols <- colorRampPalette(c("#FFFFFF", brewer.pal(7, "YlOrRd")))(nCols + 9)[seq(nCols)]
+```
+
+```{r makeLegend}
+lg <- data_frame(x = seq(nCols) - 1) %>% 
+  ggplot(aes(x = x, y = 1, fill = as.factor(x))) +
+  geom_raster() + 
+  scale_fill_manual(values = plotCols) + 
+  scale_x_continuous(breaks = quantile(seq(nCols)-1, probs = c(0, 0.5, 1)),
+                     labels = quantile(pSeq, probs= c(0, 0.5, 1)),
+                     expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0)) +
+  theme_bw() + 
+  guides(fill = FALSE) + 
+  labs(y = c(), x = c(), title = expression(paste(-log[10], "(p)"))) + 
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+### First Plot of BP GO terms 
+
+Next a `GraphNEL` object was prepared by merging individual graphs for each term, using the function `oneGOGraph`.
+The root GO term `all` was removed from these plots as it was redundant.
+
+```{r makeFirstPlotBP}
+allBPPlot <- oneGOGraph(sigBPGO[1], GOBPANCESTOR) 
+for (i in 2:length(sigBPGO)){
+  allBPPlot %<>% join(oneGOGraph(sigBPGO[i], GOBPANCESTOR))
+}
+allBPPlot %<>% removeNode("all", .) 
+```
+
+As this plot will contain edges connecting all nodes, edges not directly connecting parents and children need to be removed.
+
+```{r rmEdgesBP}
+nodeNames<- allBPPlot %>%
+  nodeData() %>%
+  names()
+validEdges <- nodeNames %>%
+  lapply(function(x){
+    parents <- allParents$BP[[x]]
+    paste(rep(x, length(parents)), parents, sep="|")
+  }) %>%
+  unlist() 
+rmEdges <- allBPPlot %>%
+  edgeData() %>%
+  names %>%
+  setdiff(validEdges) %>%
+  strsplit(split = "\\|") %>%
+  as.data.frame() %>%
+  t %>%
+  set_rownames(c())
+allBPPlot %<>% removeEdge(rmEdges[,1], rmEdges[,2], .)
+```
+
+Next the attributes for plotting each node need to be defined manually.
+This step unfortunately involved significant trial and error.
+
+```{r}
+termCols <- nodeNames %>%
+  mclapply(pcFun, ontology = "BP", mc.cores = 20) %>%
+  bind_rows() %>%
+  mutate(p = -log10(p),
+         p = replace(p, is.na(p), 0),
+         colGrp = findInterval(p, pSeq)) %>%
+  extract2("colGrp") %>%
+  set_names(nodeNames)
+termCols[!names(termCols) %in% pcBP$Term] <- NA
+```
+
+
+```{r nodeAttrsBP}
+nodeAttrs <- makeNodeAttrs(allBPPlot, shape = "ellipse", fillcolor=rgb(1, 1, 1))
+nodeNames <- names(nodeAttrs$fillcolor)
+nodeAttrs$fillcolor <- termCols[nodeNames] %>% set_names(nodeNames)
+nodeAttrs$fillcolor[is.na(nodeAttrs$fillcolor)] <- 1
+nodeAttrs$fillcolor <- plotCols[nodeAttrs$fillcolor] %>% set_names(nodeNames)
+nodeAttrs$label <- paste(nodeNames, 
+                         str_wrap(Term(nodeNames), 18), 
+                         sep = "\n") %>% 
+  set_names(nodeNames)
+nodeAttrs$shape[sigBPGO] <- "rectangle"
+attrs <- list(node = list(fontsize = 16,
+                          fixedSize =  FALSE),
+              edge = list(color = "grey70"))
+```
+
+
+```{r plotSigGoBP, fig.height= 5.5, fig.cap = "Significantly enriched GO terms are shown as rectangles, along with their relationship to parent terms in ellipses. Colours indicate -log$_{10}$ of the results from tests for enrichment. First and second level GO terms were not tested for enrichment."}
+scaleEllipse <- 1.4
+goPlot <- allBPPlot %>%
+  reverseEdgeDirections() %>%
+  layoutGraph(nodeAttrs = nodeAttrs, attrs = attrs, layoutType = "dot")
+graphRI <- graphRenderInfo(goPlot)
+graphRI$bbox <- matrix(c(-20, -40, 20, 20), byrow = TRUE, ncol=2) + graphRI$bbox
+graphRenderInfo(goPlot) <- graphRI
+nodeRI <- nodeRenderInfo(goPlot)
+nodeRI$lWidth <- nodeRI$lWidth*scaleEllipse
+nodeRI$rWidth <- nodeRI$rWidth*scaleEllipse
+nodeRI$height <- nodeRI$height*scaleEllipse
+nodeRenderInfo(goPlot) <- nodeRI
+renderGraph(goPlot)
+vp1 <- viewport(0.13, 0.15, 0.25, 0.14)
+print(lg, vp = vp1)
+```
+
+```{r exportSurvivorPcBpDag1, eval = FALSE, echo=FALSE, include=FALSE}
+png("survivorPcBpDag1.png", height = 5.5, width = 7, units = "in", res = 300)
+renderGraph(goPlot)
+vp1 <- viewport(0.13, 0.15, 0.25, 0.14)
+print(lg, vp = vp1)
+dev.off()
+```
+
+
+### GO Terms to Genes
+```{r}
+pcBP %>%
+  filter(Term %in% sigBPGO) %>%
+  mutate(Description = Term(Term)) %>%
+  dplyr::select(Term, Description) %>%
+  split(f = .$Term) %>%
+  lapply(function(df){
+    out <- names(fullGene$BP) %>%
+      extract(vapply(fullGene$BP, function(x){df$Term %in% x}, logical(1))) %>%
+      intersect(sigIDs) %>%
+      data_frame() %>%
+      set_names("ensembl_gene_id") %>%
+      left_join(dplyr::select(snpScores, ensembl_gene_id, gene_name)) %>%
+      mutate(`Term` = df[["Term"]],
+             Description = df[["Description"]])
+  }) %>%
+  bind_rows()  %>%
+  readr::write_csv("../results/topBPGenes.csv")
+```
+
+
+\clearpage
+
+## Cellular Component
+
+```{r fitPcCC}
+pcCC <- goInGenes$CC %>%
+  mclapply(pcFun, ontology = "CC", minSig = minSigG, mc.cores = 20) %>%
+  bind_rows() %>% 
+  filter(!is.na(p)) %>%
+  mutate(adjP = p.adjust(p, "holm"),
+         FDR = p.adjust(p, "BH"))
+```
+
+
+```{r resPcCC, echo=FALSE, results='asis'}
+pcCC %>%
+  arrange(p) %>%
+  dplyr::slice(1:10) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, everything()) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  xtable(caption = paste("Top 10 results for GO enrichment for Cellular Component.",
+                         "Counts represent either genes in the dataset,",
+                         "or in the list of significant genes."),
+         align = "llp{3cm}rrrrrrrr") %>%
+  print(include.rownames = FALSE,
+        size = "small",
+        caption.placement = "top",
+        comment = FALSE)
+```
+
+
+```{r, echo=FALSE}
+pcCC %>% 
+  mutate(adjP = p.adjust(p, "holm"),
+         FDR = p.adjust(p, "BH")) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         adjP = format(adjP, digits = 2),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, 
+                starts_with("Total"),
+                starts_with("Sig"),
+                Expected, p, adjP, FDR) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  write_csv("../results/parentChildCC.csv")
+```
+
+
+
+### GO Terms to Genes
+
+
+```{r getSigCC}
+resFDR <- 0.1
+sigCCGO <- pcCC %>%
+  filter(FDR < resFDR) %>%
+  extract2("Term")
+```
+
+```{r}
+pcCC %>%
+  filter(Term %in% sigCCGO) %>%
+  mutate(Description = Term(Term)) %>%
+  dplyr::select(Term, Description) %>%
+  split(f = .$Term) %>%
+  lapply(function(df){
+    out <- names(fullGene$CC) %>%
+      extract(vapply(fullGene$CC, function(x){df$Term %in% x}, logical(1))) %>%
+      intersect(sigIDs) %>%
+      data_frame() %>%
+      set_names("ensembl_gene_id") %>%
+      left_join(dplyr::select(snpScores, ensembl_gene_id, gene_name)) %>%
+      mutate(`Term` = df[["Term"]],
+             Description = df[["Description"]])
+  }) %>%
+  bind_rows()  %>%
+  readr::write_csv("../results/topCCGenes.csv")
+```
+
+
+### First Plot of CC GO terms 
+
+Using a FDR of `r resFDR`, a total of `r length(sigCCGO)` GO terms (i.e. `r pander(sigCCGO)`) were found to be significantly enriched from the Cellular Component Ontology.
+
+The same series of preparatory steps was then undertaken as for the BP ontology, but using the same legend.
+
+Next a `GraphNEL` object was prepared by merging individual graphs for each term, using the function `oneGOGraph`.
+The root GO term `all` was removed from these plots as it was redundant.
+
+```{r, makeFirstPlotCC}
+allCCPlot <- oneGOGraph(sigCCGO[1], GOCCANCESTOR) 
+for (i in 2:length(sigCCGO)){
+  allCCPlot %<>% join(oneGOGraph(sigCCGO[i], GOCCANCESTOR))
+}
+allCCPlot %<>% removeNode("all", .) 
+```
+
+As this plot will contain edges connecting all nodes, edges not directly connecting parents and children need to be removed.
+
+```{r, rmEdgesCC}
+nodeNames<- allCCPlot %>%
+  nodeData() %>%
+  names()
+validEdges <- nodeNames %>%
+  lapply(function(x){
+    parents <- allParents$CC[[x]]
+    paste(rep(x, length(parents)), parents, sep="|")
+  }) %>%
+  unlist() 
+rmEdges <- allCCPlot %>%
+  edgeData() %>%
+  names %>%
+  setdiff(validEdges) %>%
+  strsplit(split = "\\|") %>%
+  as.data.frame() %>%
+  t %>%
+  set_rownames(c())
+allCCPlot %<>% removeEdge(rmEdges[,1], rmEdges[,2], .)
+```
+
+Next the attributes for plotting each node need to be defined manually.
+This step unfortunately involved significant trial and error.
+
+```{r}
+termCols <- nodeNames %>%
+  mclapply(pcFun, ontology = "CC", mc.cores = 20) %>%
+  bind_rows() %>%
+  mutate(p = -log10(p),
+         p = replace(p, is.na(p), 0),
+         colGrp = findInterval(p, pSeq)) %>%
+  extract2("colGrp") %>%
+  set_names(nodeNames)
+termCols[!names(termCols) %in% pcCC$Term] <- NA
+```
+
+
+```{r, nodeAttrsCC}
+nodeAttrs <- makeNodeAttrs(allCCPlot, shape = "ellipse", fillcolor=rgb(1, 1, 1))
+nodeNames <- names(nodeAttrs$fillcolor)
+nodeAttrs$fillcolor <- termCols[nodeNames] %>% set_names(nodeNames)
+nodeAttrs$fillcolor[is.na(nodeAttrs$fillcolor)] <- 1
+nodeAttrs$fillcolor <- plotCols[nodeAttrs$fillcolor] %>% set_names(nodeNames)
+nodeAttrs$label <- paste(nodeNames, 
+                         str_wrap(Term(nodeNames), 18), 
+                         sep = "\n") %>% 
+  set_names(nodeNames)
+nodeAttrs$shape[sigCCGO] <- "rectangle"
+attrs <- list(node = list(fontsize = 16,
+                          fixedSize =  FALSE),
+              edge = list(color = "grey70"))
+```
+
+
+```{r, plotSigGoCC, fig.height= 5.5, fig.cap = "Significantly enriched GO terms are shown as rectangles, along with their relationship to parent terms in ellipses. Colours indicate -log$_{10}$ of the results from tests for enrichment. First and second level GO terms were not tested for enrichment."}
+scaleEllipse <- 1.4
+goPlot <- allCCPlot %>%
+  reverseEdgeDirections() %>%
+  layoutGraph(nodeAttrs = nodeAttrs, attrs = attrs, layoutType = "dot")
+graphRI <- graphRenderInfo(goPlot)
+graphRI$bbox <- matrix(c(-20, -40, 20, 20), byrow = TRUE, ncol=2) + graphRI$bbox
+graphRenderInfo(goPlot) <- graphRI
+nodeRI <- nodeRenderInfo(goPlot)
+nodeRI$lWidth <- nodeRI$lWidth*scaleEllipse
+nodeRI$rWidth <- nodeRI$rWidth*scaleEllipse
+nodeRI$height <- nodeRI$height*scaleEllipse
+nodeRenderInfo(goPlot) <- nodeRI
+renderGraph(goPlot)
+vp1 <- viewport(0.83, 0.86, 0.25, 0.14)
+print(lg, vp = vp1)
+```
+
+```{r exportSurvivorPcCCDag1.png, eval = FALSE, echo=FALSE, include=FALSE}
+png("survivorPcCCDag1.png", height = 5.5, width = 7, units = "in", res = 300)
+renderGraph(goPlot)
+vp1 <- viewport(0.83, 0.12, 0.25, 0.14)
+print(lg, vp = vp1)
+dev.off()
+```
+
+
+
+## Molecular Function
+
+```{r fitPcMF}
+pcMF <- goInGenes$MF %>%
+  mclapply(pcFun, ontology = "MF", minSig = minSigG, mc.cores = 20) %>%
+  bind_rows() %>% 
+  filter(!is.na(p)) %>%
+  mutate(adjP = p.adjust(p, "holm"),
+         FDR = p.adjust(p, "BH"))
+```
+
+
+```{r resPcMF, echo=FALSE, results='asis'}
+pcMF %>% 
+  arrange(p) %>%
+  filter(SigInChild > Expected) %>%
+  dplyr::slice(1:10) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, everything()) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  xtable(caption = paste("Top 10 results for GO enrichment for Molecular Function.",
+                         "Counts represent either genes in the dataset,",
+                         "or in the list of significant genes."),
+         align = "llp{3cm}rrrrrrrr") %>%
+  print(include.rownames = FALSE,
+        size = "small",
+        caption.placement = "top",
+        comment = FALSE)
+```
+
+
+
+```{r, echo=FALSE}
+pcMF %>% 
+  mutate(adjP = p.adjust(p, "holm"),
+         FDR = p.adjust(p, "BH")) %>%
+  filter(SigInChild > Expected) %>%
+  dplyr::select(-Ontology) %>%
+  mutate(Description = Term(Term),
+         Description = str2Width(Description, 33),
+         Expected = format(Expected, digits = 1),
+         p = format(p, digits = 3),
+         adjP = format(adjP, digits = 2),
+         FDR = format(FDR, digits = 2)) %>%
+  dplyr::select(Term, Description, 
+                starts_with("Total"),
+                starts_with("Sig"),
+                Expected, p, adjP, FDR) %>%
+  dplyr::rename(AllParent = TotalParent,
+         AllChild = TotalChild,
+         Exp = Expected) %>%
+  write_csv("../results/parentChildMF.csv")
+```
+
+### First Plot of MF GO terms 
+
+
+```{r getSigMF}
+resFDR <- 0.1
+sigMFGO <- pcMF %>%
+  filter(FDR < resFDR,
+         SigInChild > Expected) %>%
+  extract2("Term")
+```
+
+
+Using a FDR of `r resFDR`, a total of `r length(sigMFGO)` GO terms (i.e. `r pander(sigMFGO)`) were found to be significantly enriched from the Cellular Component Ontology.
+
+The same series of preparatory steps was then undertaken as for the BP ontology., again using the same legend.
+
+Next a `GraphNEL` object was prepared by merging individual graphs for each term, using the function `oneGOGraph`.
+The root GO term `all` was removed from these plots as it was redundant.
+
+```{r, makeFirstPlotMF}
+allMFPlot <- oneGOGraph(sigMFGO[1], GOMFANCESTOR) 
+for (i in 2:length(sigMFGO)){
+  allMFPlot %<>% join(oneGOGraph(sigMFGO[i], GOMFANCESTOR))
+}
+allMFPlot %<>% removeNode("all", .) 
+```
+
+As this plot will contain edges connecting all nodes, edges not directly connecting parents and children need to be removed.
+
+```{r rmEdgesMF}
+nodeNames<- allMFPlot %>%
+  nodeData() %>%
+  names()
+validEdges <- nodeNames %>%
+  lapply(function(x){
+    parents <- allParents$MF[[x]]
+    paste(rep(x, length(parents)), parents, sep="|")
+  }) %>%
+  unlist() 
+rmEdges <- allMFPlot %>%
+  edgeData() %>%
+  names %>%
+  setdiff(validEdges) %>%
+  strsplit(split = "\\|") %>%
+  as.data.frame() %>%
+  t %>%
+  set_rownames(c())
+allMFPlot %<>% removeEdge(rmEdges[,1], rmEdges[,2], .)
+```
+
+Next the attributes for plotting each node need to be defined manually.
+This step unfortunately involved significant trial and error.
+
+```{r}
+termCols <- nodeNames %>%
+  mclapply(pcFun, ontology = "MF", mc.cores = 20) %>%
+  bind_rows() %>%
+  mutate(p = -log10(p),
+         p = replace(p, is.na(p), 0),
+         colGrp = findInterval(p, pSeq)) %>%
+  extract2("colGrp") %>%
+  set_names(nodeNames)
+termCols[!names(termCols) %in% pcMF$Term] <- NA
+```
+
+
+```{r, nodeAttrsMF}
+nodeAttrs <- makeNodeAttrs(allMFPlot, shape = "ellipse", fillcolor=rgb(1, 1, 1))
+nodeNames <- names(nodeAttrs$fillcolor)
+nodeAttrs$fillcolor <- termCols[nodeNames] %>% set_names(nodeNames)
+nodeAttrs$fillcolor[is.na(nodeAttrs$fillcolor)] <- 1
+nodeAttrs$fillcolor <- plotCols[nodeAttrs$fillcolor] %>% set_names(nodeNames)
+nodeAttrs$label <- paste(nodeNames, 
+                         str_wrap(str_trunc(Term(nodeNames), width = 41), 18), 
+                         sep = "\n") %>% 
+  set_names(nodeNames)
+nodeAttrs$shape[sigMFGO] <- "rectangle"
+attrs <- list(node = list(fontsize = 16,
+                          fixedSize =  FALSE),
+              edge = list(color = "grey70"))
+```
+
+
+```{r, plotSigGoMF, fig.height= 5.5, fig.cap = "Significantly enriched GO terms are shown as rectangles, along with their relationship to parent terms in ellipses. Colours indicate -log$_{10}$ of the results from tests for enrichment. First and second level GO terms were not tested for enrichment."}
+scaleEllipse <- 1.4
+goPlot <- allMFPlot %>%
+  reverseEdgeDirections() %>%
+  layoutGraph(nodeAttrs = nodeAttrs, attrs = attrs, layoutType = "dot")
+graphRI <- graphRenderInfo(goPlot)
+graphRI$bbox <- matrix(c(-20, -40, 20, 20), byrow = TRUE, ncol=2) + graphRI$bbox
+graphRenderInfo(goPlot) <- graphRI
+nodeRI <- nodeRenderInfo(goPlot)
+nodeRI$lWidth <- nodeRI$lWidth*scaleEllipse*1.1
+nodeRI$rWidth <- nodeRI$rWidth*scaleEllipse*1.1
+nodeRI$height <- nodeRI$height*scaleEllipse
+nodeRenderInfo(goPlot) <- nodeRI
+renderGraph(goPlot)
+vp1 <- viewport(0.83, 0.13, 0.25, 0.14)
+print(lg, vp = vp1)
+```
+
+
+```{r exportSurvivorPcMFDag1.png, eval = FALSE, echo=FALSE, include=FALSE}
+png("survivorPcMFDag1.png", height = 5.5, width = 7, units = "in", res = 300)
+renderGraph(goPlot)
+print(lg, vp = vp1)
+dev.off()
+```
+
+
+
+### GO Terms to Genes
+
+
+```{r}
+pcMF %>%
+  filter(Term %in% sigMFGO) %>%
+  mutate(Description = Term(Term)) %>%
+  dplyr::select(Term, Description) %>%
+  split(f = .$Term) %>%
+  lapply(function(df){
+    out <- names(fullGene$MF) %>%
+      extract(vapply(fullGene$MF, function(x){df$Term %in% x}, logical(1))) %>%
+      intersect(sigIDs) %>%
+      data_frame() %>%
+      set_names("ensembl_gene_id") %>%
+      left_join(dplyr::select(snpScores, ensembl_gene_id, gene_name)) %>%
+      mutate(`Term` = df[["Term"]],
+             Description = df[["Description"]])
+  }) %>%
+  bind_rows() %>%
+  readr::write_csv("../results/topMFGenes.csv")
+```
+
+
+#Appendix
+
+```{r, eval=FALSE}
+save.image("goEnrichment20170214.RData")
+```
+
+```{r}
+sessionInfo()
+```
+

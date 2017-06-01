@@ -1,0 +1,94 @@
+Term,Description,AllParent,AllChild,SigInParent,SigInChild,Exp,p,adjP,FDR
+GO:0004888,transmembrane signaling recept...,998,899,15,14,13.5,0.673500,1.000,0.995
+GO:0099600,transmembrane receptor activity,1087,937,16,14,13.8,0.879387,1.000,0.995
+GO:0046872,metal ion binding,2108,2094,19,19,18.9,0.988952,1.000,0.995
+GO:0050839,cell adhesion molecule binding,7199,268,70,4, 2.6,0.380537,1.000,0.995
+GO:0098631,protein binding involved in ce...,7199,196,70,3, 1.9,0.423705,1.000,0.995
+GO:0098632,protein binding involved in ce...,196,192,3,3, 2.9,0.995211,1.000,0.995
+GO:0005509,calcium ion binding,2094,429,19,5, 3.9,0.528977,1.000,0.995
+GO:0008324,cation transmembrane transport...,501,388,9,7, 7.0,0.980776,1.000,0.995
+GO:0015075,ion transmembrane transporter ...,562,501,9,9, 8.0,0.985558,1.000,0.995
+GO:0015077,monovalent inorganic cation tr...,309,217,5,4, 3.5,0.633853,1.000,0.995
+GO:0015078,hydrogen ion transmembrane tra...,217,68,4,2, 1.2,0.428285,1.000,0.995
+GO:0022891,substrate-specific transmembra...,710,562,9,9, 7.1,0.976570,1.000,0.995
+GO:0000975,regulatory region DNA binding,1086,430,9,7, 3.5,0.035766,1.000,0.439
+GO:0000976,transcription regulatory regio...,437,335,6,6, 4.6,0.980671,1.000,0.995
+GO:0001046,core promoter sequence-specifi...,354,68,6,3, 1.1,0.075627,1.000,0.577
+GO:0001047,core promoter binding,426,98,6,3, 1.4,0.135900,1.000,0.832
+GO:0001067,regulatory region nucleic acid...,2333,430,18,7, 3.3,0.031537,1.000,0.439
+GO:0003677,DNA binding,2333,1086,18,9, 8.4,0.768460,1.000,0.995
+GO:0003690,double-stranded DNA binding,1086,382,9,6, 3.1,0.063791,1.000,0.577
+GO:0043565,sequence-specific DNA binding,1086,558,9,6, 4.6,0.364746,1.000,0.995
+GO:1990837,sequence-specific double-stran...,586,348,6,6, 3.5,0.979586,1.000,0.995
+GO:0001012,RNA polymerase II regulatory r...,426,296,6,5, 4.2,0.469548,1.000,0.995
+GO:0001159,core promoter proximal region ...,426,192,6,3, 2.7,0.807218,1.000,0.995
+GO:0000981,RNA polymerase II transcriptio...,547,326,5,3, 3.0,0.985310,1.000,0.995
+GO:0000982,"transcription factor activity,...",326,199,3,3, 1.8,0.985632,1.000,0.995
+GO:0001228,transcriptional activator acti...,326,194,3,3, 1.8,0.985571,1.000,0.995
+GO:0001077,transcriptional activator acti...,253,137,3,3, 1.6,0.985357,1.000,0.995
+GO:0008047,enzyme activator activity,421,203,3,3, 1.4,0.977064,1.000,0.995
+GO:0004518,nuclease activity,439,102,4,2, 0.9,0.229679,1.000,0.910
+GO:0004527,exonuclease activity,102,41,2,2, 0.8,0.987585,1.000,0.995
+GO:0043168,anion binding,2199,135,22,3, 1.3,0.154145,1.000,0.838
+GO:0005543,phospholipid binding,319,197,5,4, 3.1,0.413389,1.000,0.995
+GO:0035091,phosphatidylinositol binding,197,135,4,3, 2.7,0.779165,1.000,0.995
+GO:1901981,phosphatidylinositol phosphate...,135,73,3,3, 1.6,0.985335,1.000,0.995
+GO:0019787,ubiquitin-like protein transfe...,1498,205,12,2, 1.6,0.763363,1.000,0.995
+GO:0004842,ubiquitin-protein transferase ...,205,197,2,2, 1.9,0.993712,1.000,0.995
+GO:0070011,"peptidase activity, acting on ...",445,437,3,3, 2.9,0.992759,1.000,0.995
+GO:0046983,protein dimerization activity,7199,651,70,9, 6.3,0.266628,1.000,0.931
+GO:0042802,identical protein binding,7199,673,70,10, 6.5,0.157896,1.000,0.838
+GO:0016462,pyrophosphatase activity,482,479,12,12,11.9,0.994272,1.000,0.995
+GO:0016817,"hydrolase activity, acting on ...",1582,487,20,12, 6.1,0.007304,0.869,0.209
+GO:0016818,"hydrolase activity, acting on ...",487,482,12,12,11.9,0.994058,1.000,0.995
+GO:0001882,nucleoside binding,3868,1252,32,13,10.3,0.318686,1.000,0.972
+GO:0001883,purine nucleoside binding,1252,1247,13,13,12.9,0.994241,1.000,0.995
+GO:0017076,purine nucleotide binding,1619,1270,14,13,11.0,0.217405,1.000,0.910
+GO:0030554,adenyl nucleotide binding,1270,1032,13,11,10.6,0.755878,1.000,0.995
+GO:0032549,ribonucleoside binding,1252,1249,13,13,13.0,0.994467,1.000,0.995
+GO:0032550,purine ribonucleoside binding,1250,1246,13,13,13.0,0.994339,1.000,0.995
+GO:0032553,ribonucleotide binding,1774,1273,15,13,10.7,0.214289,1.000,0.910
+GO:0032555,purine ribonucleotide binding,1280,1263,13,13,12.8,0.990352,1.000,0.995
+GO:0032559,adenyl ribonucleotide binding,1269,1026,13,11,10.5,0.729561,1.000,0.995
+GO:0035639,purine ribonucleoside triphosp...,1619,1240,14,13,10.7,0.181387,1.000,0.910
+GO:1901265,nucleoside phosphate binding,3691,1619,30,14,13.2,0.756168,1.000,0.995
+GO:0005102,receptor binding,7199,715,70,8, 6.9,0.674279,1.000,0.995
+GO:0032403,protein complex binding,7233,367,71,6, 3.6,0.198250,1.000,0.910
+GO:0004551,nucleotide diphosphatase activity,479,6,12,2, 0.1,0.000665,0.081,0.049
+GO:0003774,motor activity,449,86,8,4, 1.5,0.039625,1.000,0.439
+GO:0008092,cytoskeletal protein binding,7199,493,70,8, 4.8,0.132441,1.000,0.832
+GO:0015631,tubulin binding,493,174,8,4, 2.8,0.387337,1.000,0.995
+GO:0003777,microtubule motor activity,86,54,4,3, 2.5,0.609735,1.000,0.995
+GO:0008017,microtubule binding,174,124,4,3, 2.8,0.867542,1.000,0.995
+GO:0019899,enzyme binding,7199,959,70,11, 9.3,0.554415,1.000,0.995
+GO:0003713,transcription coactivator acti...,219,130,3,2, 1.8,0.796121,1.000,0.995
+GO:0005216,ion channel activity,511,267,9,7, 4.7,0.143212,1.000,0.832
+GO:0005261,cation channel activity,462,192,9,5, 3.7,0.395659,1.000,0.995
+GO:0022803,passive transmembrane transpor...,621,285,9,7, 4.1,0.074709,1.000,0.577
+GO:0022838,substrate-specific channel act...,570,277,9,7, 4.3,0.099605,1.000,0.715
+GO:0015079,potassium ion transmembrane tr...,308,87,5,2, 1.4,0.560639,1.000,0.995
+GO:0005267,potassium channel activity,205,73,5,2, 1.8,0.835804,1.000,0.995
+GO:0044389,ubiquitin-like protein ligase ...,959,149,11,3, 1.7,0.289985,1.000,0.931
+GO:0004672,protein kinase activity,598,467,6,5, 4.7,0.756265,1.000,0.995
+GO:0004713,protein tyrosine kinase activity,467,90,5,4, 0.9,0.010930,1.000,0.209
+GO:0004714,transmembrane receptor protein...,103,45,4,3, 1.7,0.231124,1.000,0.910
+GO:0016301,kinase activity,695,594,6,6, 5.1,0.981464,1.000,0.995
+GO:0016772,"transferase activity, transfer...",1498,695,12,6, 5.6,0.801665,1.000,0.995
+GO:0016773,"phosphotransferase activity, a...",695,539,6,5, 4.7,0.734729,1.000,0.995
+GO:0019199,transmembrane receptor protein...,1307,58,16,3, 0.7,0.011996,1.000,0.209
+GO:0019838,growth factor binding,7199,73,70,2, 0.7,0.140160,1.000,0.832
+GO:0005021,vascular endothelial growth fa...,45,5,3,3, 0.1,0.995432,1.000,0.995
+GO:0044822,poly(A) RNA binding,939,708,5,4, 3.8,0.811265,1.000,0.995
+GO:0003779,actin binding,493,222,8,4, 3.6,0.776121,1.000,0.995
+GO:0019901,protein kinase binding,327,289,2,2, 1.8,0.989499,1.000,0.995
+GO:0005178,integrin binding,1162,48,12,2, 0.5,0.046822,1.000,0.476
+GO:0022834,ligand-gated channel activity,1055,91,16,2, 1.4,0.580787,1.000,0.995
+GO:0005230,extracellular ligand-gated ion...,91,56,2,2, 1.2,0.988268,1.000,0.995
+GO:0005231,excitatory extracellular ligan...,56,41,2,2, 1.4,0.992659,1.000,0.995
+GO:0030594,neurotransmitter receptor acti...,960,36,15,2, 0.5,0.069169,1.000,0.577
+GO:0015464,acetylcholine receptor activity,899,12,14,2, 0.2,0.001199,0.144,0.049
+GO:0005253,anion channel activity,319,41,7,2, 0.9,0.227951,1.000,0.910
+GO:0008509,anion transmembrane transporte...,501,94,9,2, 1.7,0.788878,1.000,0.995
+GO:0015103,inorganic anion transmembrane ...,94,65,2,2, 1.4,0.992575,1.000,0.995
+GO:0015108,chloride transmembrane transpo...,65,43,2,2, 1.3,0.992503,1.000,0.995
+GO:0005254,chloride channel activity,50,34,2,2, 1.3,0.992536,1.000,0.995

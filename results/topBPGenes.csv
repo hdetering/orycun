@@ -1,0 +1,6 @@
+ensembl_gene_id,gene_name,Term,Description
+ENSOCUG00000005714,GBF1,GO:0006896,Golgi to vacuole transport
+ENSOCUG00000013706,KIF16B,GO:0006896,Golgi to vacuole transport
+ENSOCUG00000007140,ABL1,GO:0090398,cellular senescence
+ENSOCUG00000016048,CDKN1A,GO:0090398,cellular senescence
+ENSOCUG00000022537,HMGA1,GO:0090398,cellular senescence
